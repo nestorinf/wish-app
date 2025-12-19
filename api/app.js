@@ -94,10 +94,17 @@ async function handler(req, res) {
             const { name, wish } = JSON.parse(b);
             const cleanName = cleanInput(name).toUpperCase();
             const cleanWish = cleanInput(wish, 300);
-            if (!cleanName || !cleanWish) { res.writeHead(400); return res.end(); }
+            if (!cleanName || !cleanWish) {
+                res.writeHead(400);
+                return res.end(); // Agregado return
+            }
             await pool.query('INSERT INTO wishes (name, wish) VALUES ($1, $2)', [cleanName, cleanWish]);
             res.writeHead(200).end();
-        } catch (e) { res.writeHead(400).end(); }
+            return; // <--- AGREGA ESTO para que no siga hacia el HTML
+        } catch (e) {
+            res.writeHead(400).end();
+            return; // <--- AGREGA ESTO
+        }
     }
 
     if (pUrl.pathname === '/api/delete' && req.method === 'POST') {
@@ -193,11 +200,14 @@ async function handler(req, res) {
             if (!name || !code) return alert("Completa los campos.");
             const res = await fetch('/api/login', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ name, code }) });
             const data = await res.json();
-            if (res.ok) { localStorage.setItem('naviwish_user', name.toUpperCase()); currentUser = name.toUpperCase(); render(); }
+            if (res.ok) { localStorage.setItem('naviwish_user', name.toUpperCase()); currentUser = name.toUpperCase(); render(); song.play().then(() => localStorage.setItem('playMusic', 'true')).catch(() => {});}
             else { alert(data.error); if (data.locked) setTimeout(() => location.reload(), 2000); }
         }
 
-        function logout() { localStorage.clear(); location.reload(); }
+        function logout() { 
+            localStorage.removeItem('naviwish_user'); 
+            location.reload(); 
+        }
 
         async function addWish() {
             const val = document.getElementById('wishInput').value.trim();
@@ -219,7 +229,7 @@ async function handler(req, res) {
                 preview.innerHTML = data.slice(0, 10).map(i => \`
                     <div class="flex items-center gap-2 bg-gray-50/50 p-2 rounded-xl border border-white/20">
                         <span class="text-[8px] font-black px-1.5 py-0.5 rounded text-white" style="background:\${getColor(i.name)}">\${i.name}</span>
-                        <span class="text-[10px] text-gray-500 truncate italic font-medium">"\${i.wish}"</span>
+                        <span class="text-[16px] text-gray-500 truncate italic font-medium">"\${i.wish}"</span>
                     </div>
                 \`).join('');
             }
