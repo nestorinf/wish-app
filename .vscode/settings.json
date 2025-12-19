@@ -1,0 +1,19 @@
+{
+    "sqltools.connections": [
+        {
+            "pgOptions": {
+                "ssl": {
+                    "rejectUnauthorized": true
+                }
+            },
+            "ssh": "Disabled",
+            "previewLimit": 50,
+            "server": "dpg-d52nvpnpm1nc73esh2n0-a.oregon-postgres.render.com",
+            "port": 5432,
+            "driver": "PostgreSQL",
+            "name": "RENDER",
+            "database": "whishdb",
+            "username": "whishdb_user"
+        }
+    ]
+}
