@@ -124,7 +124,7 @@ async function handler(req, res) {
 
     // --- API: OTROS ---
     if (pUrl.pathname === '/api/wishes' && req.method === 'GET') {
-        const result = await pool.query('SELECT * FROM wishes ORDER BY created_at DESC');
+        const result = await pool.query('SELECT * FROM wishes ORDER BY name,created_at DESC');
         res.writeHead(200, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify(result.rows));
     }
