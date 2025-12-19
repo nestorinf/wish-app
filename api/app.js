@@ -52,7 +52,7 @@ async function handler(req, res) {
         try {
             const data = JSON.parse(body);
             const cleanName = cleanInput(data.name).toUpperCase();
-            const cleanCode = cleanInput(data.code);
+            const cleanCode = cleanInput(data.code).toUpperCase();
 
             if (!cleanName || !cleanCode) {
                 res.writeHead(400); return res.end(JSON.stringify({ error: 'Faltan datos.' }));
