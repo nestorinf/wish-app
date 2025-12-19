@@ -3,11 +3,14 @@ const { Pool } = require('pg');
 const url = require('url');
 const fs = require('fs');
 const path = require('path');
+const jwt = require('jsonwebtoken'); // Importado para la lógica de sesión
 
 const pool = new Pool({
     connectionString: process.env.POSTGRES_URL,
     ssl: { rejectUnauthorized: false }
 });
+
+const JWT_SECRET = process.env.JWT_SECRET || 'navidad_segura_2025';
 
 const ALLOWED_USERS = [
     "NESTOR", "KEYKA", "SILVIANA", "ROBERTO", "DANIEL",
@@ -18,6 +21,18 @@ const ALLOWED_USERS = [
 function cleanInput(str, maxLength = 255) {
     if (typeof str !== 'string') return '';
     return str.trim().replace(/<[^>]*>?/gm, '').substring(0, maxLength);
+}
+
+// Función para validar el token en cada petición protegida
+function verifyToken(req) {
+    try {
+        const authHeader = req.headers['authorization'];
+        if (!authHeader) return null;
+        const token = authHeader.split(' ')[1];
+        return jwt.verify(token, JWT_SECRET);
+    } catch (err) {
+        return null;
+    }
 }
 
 async function handler(req, res) {
@@ -50,68 +65,68 @@ async function handler(req, res) {
             const userRes = await pool.query('SELECT code, attempts, block_until FROM users WHERE name = $1', [cleanName]);
 
             if (userRes.rows.length > 0 && userRes.rows[0].block_until) {
-                const now = new Date();
-                const blockTime = new Date(userRes.rows[0].block_until);
-                if (now < blockTime) {
-                    const diff = Math.ceil((blockTime - now) / 60000);
-                    res.writeHead(403, { 'Content-Type': 'application/json' });
-                    return res.end(JSON.stringify({ error: `BLOQUEADO. Intenta en ${diff} min.`, locked: true }));
+                if (new Date() < new Date(userRes.rows[0].block_until)) {
+                    const diff = Math.ceil((new Date(userRes.rows[0].block_until) - new Date()) / 60000);
+                    res.writeHead(403); return res.end(JSON.stringify({ error: `BLOQUEADO. Intenta en ${diff} min.`, locked: true }));
                 }
             }
 
+            let loginValid = false;
             if (userRes.rows.length === 0) {
                 await pool.query('INSERT INTO users (name, code, attempts) VALUES ($1, $2, 0)', [cleanName, cleanCode]);
-                res.writeHead(200); return res.end(JSON.stringify({ success: true }));
+                loginValid = true;
+            } else if (userRes.rows[0].code === cleanCode) {
+                await pool.query('UPDATE users SET attempts = 0, block_until = NULL WHERE name = $1', [cleanName]);
+                loginValid = true;
+            }
+
+            if (loginValid) {
+                // Generar token de 10 minutos
+                const token = jwt.sign({ name: cleanName }, JWT_SECRET, { expiresIn: '10m' });
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ success: true, token, name: cleanName }));
             } else {
-                if (userRes.rows[0].code === cleanCode) {
-                    await pool.query('UPDATE users SET attempts = 0, block_until = NULL WHERE name = $1', [cleanName]);
-                    res.writeHead(200); return res.end(JSON.stringify({ success: true }));
-                } else {
-                    const newAttempts = (userRes.rows[0].attempts || 0) + 1;
-                    let blockUntil = null;
-                    if (newAttempts >= 3) blockUntil = new Date(Date.now() + 2 * 60 * 1000);
-                    await pool.query('UPDATE users SET attempts = $1, block_until = $2 WHERE name = $3', [newAttempts, blockUntil, cleanName]);
-                    res.writeHead(403, { 'Content-Type': 'application/json' });
-                    return res.end(JSON.stringify({
-                        error: newAttempts >= 3 ? 'BLOQUEADO POR 2 MINUTOS.' : `CÓDIGO ERRADO. Intento ${newAttempts}/3`,
-                        locked: newAttempts >= 3
-                    }));
-                }
+                const newAttempts = (userRes.rows[0]?.attempts || 0) + 1;
+                let blockUntil = newAttempts >= 3 ? new Date(Date.now() + 2 * 60 * 1000) : null;
+                await pool.query('UPDATE users SET attempts = $1, block_until = $2 WHERE name = $3', [newAttempts, blockUntil, cleanName]);
+                res.writeHead(403); return res.end(JSON.stringify({ error: newAttempts >= 3 ? 'BLOQUEADO.' : `ERROR ${newAttempts}/3`, locked: newAttempts >= 3 }));
             }
         } catch (err) { res.writeHead(400); return res.end(JSON.stringify({ error: 'Error.' })); }
     }
 
-    // --- API: OTROS ENDPOINTS ---
+    // --- API: AGREGAR (Protegido con JWT) ---
+    if (pUrl.pathname === '/api/add' && req.method === 'POST') {
+        const decoded = verifyToken(req);
+        if (!decoded) { res.writeHead(401); return res.end(JSON.stringify({ error: 'Sesión expirada' })); }
+
+        let b = ''; req.on('data', c => b += c); await new Promise(r => req.on('end', r));
+        try {
+            const { wish } = JSON.parse(b);
+            const cleanWish = cleanInput(wish, 300);
+            if (!cleanWish) { res.writeHead(400); return res.end(); }
+            await pool.query('INSERT INTO wishes (name, wish) VALUES ($1, $2)', [decoded.name, cleanWish]);
+            res.writeHead(200).end();
+            return;
+        } catch (e) { res.writeHead(400).end(); return; }
+    }
+
+    // --- API: ELIMINAR (Protegido con JWT) ---
+    if (pUrl.pathname === '/api/delete' && req.method === 'POST') {
+        const decoded = verifyToken(req);
+        if (!decoded) { res.writeHead(401).end(); return; }
+
+        let b = ''; req.on('data', c => b += c); await new Promise(r => req.on('end', r));
+        const { id } = JSON.parse(b);
+        // Solo puede borrar sus propios deseos
+        await pool.query('DELETE FROM wishes WHERE id = $1 AND name = $2', [id, decoded.name]);
+        return res.writeHead(200).end();
+    }
+
+    // --- API: OTROS ---
     if (pUrl.pathname === '/api/wishes' && req.method === 'GET') {
         const result = await pool.query('SELECT * FROM wishes ORDER BY created_at DESC');
         res.writeHead(200, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify(result.rows));
-    }
-
-    if (pUrl.pathname === '/api/add' && req.method === 'POST') {
-        let b = ''; req.on('data', c => b += c); await new Promise(r => req.on('end', r));
-        try {
-            const { name, wish } = JSON.parse(b);
-            const cleanName = cleanInput(name).toUpperCase();
-            const cleanWish = cleanInput(wish, 300);
-            if (!cleanName || !cleanWish) {
-                res.writeHead(400);
-                return res.end(); // Agregado return
-            }
-            await pool.query('INSERT INTO wishes (name, wish) VALUES ($1, $2)', [cleanName, cleanWish]);
-            res.writeHead(200).end();
-            return; // <--- AGREGA ESTO para que no siga hacia el HTML
-        } catch (e) {
-            res.writeHead(400).end();
-            return; // <--- AGREGA ESTO
-        }
-    }
-
-    if (pUrl.pathname === '/api/delete' && req.method === 'POST') {
-        let b = ''; req.on('data', c => b += c); await new Promise(r => req.on('end', r));
-        const { id } = JSON.parse(b);
-        await pool.query('DELETE FROM wishes WHERE id = $1', [id]);
-        return res.writeHead(200).end();
     }
 
     if (pUrl.pathname === '/api/musica') {
@@ -122,6 +137,8 @@ async function handler(req, res) {
         }
         res.writeHead(404).end(); return;
     }
+
+    if (pUrl.pathname.startsWith('/api/')) { res.writeHead(404).end(); return; }
 
     // --- FRONTEND ---
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -200,25 +217,51 @@ async function handler(req, res) {
             if (!name || !code) return alert("Completa los campos.");
             const res = await fetch('/api/login', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ name, code }) });
             const data = await res.json();
-            if (res.ok) { localStorage.setItem('naviwish_user', name.toUpperCase()); currentUser = name.toUpperCase(); render(); song.play().then(() => localStorage.setItem('playMusic', 'true')).catch(() => {});}
+            if (res.ok) { 
+                localStorage.setItem('naviwish_token', data.token);
+                localStorage.setItem('naviwish_user', data.name);
+                currentUser = data.name; 
+                render(); 
+                song.play().then(() => localStorage.setItem('playMusic', 'true')).catch(() => {});
+            }
             else { alert(data.error); if (data.locked) setTimeout(() => location.reload(), 2000); }
         }
 
         function logout() { 
             localStorage.removeItem('naviwish_user'); 
+            localStorage.removeItem('naviwish_token');
             location.reload(); 
         }
 
         async function addWish() {
-            const val = document.getElementById('wishInput').value.trim();
-            if (!val) return;
-            await fetch('/api/add', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ name: currentUser, wish: val }) });
+            const wish = document.getElementById('wishInput').value.trim();
+            if (!wish) return;
+            const res = await fetch('/api/add', { 
+                method: 'POST', 
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + localStorage.getItem('naviwish_token')
+                }, 
+                body: JSON.stringify({ wish }) 
+            });
+            if (res.status === 401) return logout();
             document.getElementById('wishInput').value = '';
             loadWishes();
         }
 
         async function deleteWish(id) {
-            if (confirm('¿Eliminar deseo?')) { await fetch('/api/delete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ id }) }); loadWishes(); }
+            if (confirm('¿Eliminar deseo?')) { 
+                const res = await fetch('/api/delete', { 
+                    method: 'POST', 
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + localStorage.getItem('naviwish_token')
+                    }, 
+                    body: JSON.stringify({ id }) 
+                }); 
+                if (res.status === 401) return logout();
+                loadWishes(); 
+            }
         }
 
         async function loadWishes() {
@@ -253,7 +296,7 @@ async function handler(req, res) {
         }
 
         function render() {
-            if (currentUser) {
+            if (currentUser && localStorage.getItem('naviwish_token')) {
                 document.getElementById('login-view').classList.add('hidden');
                 document.getElementById('app-view').classList.remove('hidden');
                 document.getElementById('welcome-msg').innerText = 'HOLA, ' + currentUser;
@@ -268,7 +311,9 @@ async function handler(req, res) {
 
         window.onload = () => {
             render();
-            if (localStorage.getItem('playMusic') === 'true') song.play().catch(() => {});
+            if (localStorage.getItem('playMusic') === 'true' || !currentUser) {
+                song.play().catch(() => {});
+            }
             const snow = document.getElementById('snow');
             for (let i = 0; i < 30; i++) {
                 const s = document.createElement('div');
