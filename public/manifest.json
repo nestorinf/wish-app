@@ -1,0 +1,15 @@
+{
+    "name": "NaviWish 2025",
+    "short_name": "NaviWish",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#1b342d",
+    "theme_color": "#d42426",
+    "icons": [
+        {
+            "src": "https://cdn-icons-png.flaticon.com/512/3893/3893110.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        }
+    ]
+}

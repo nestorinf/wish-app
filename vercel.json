@@ -1,0 +1,20 @@
+{
+    "rewrites": [
+        {
+            "source": "/api/musica",
+            "destination": "/api/index.js"
+        },
+        {
+            "source": "/api/add",
+            "destination": "/api/index.js"
+        },
+        {
+            "source": "/api/delete",
+            "destination": "/api/index.js"
+        },
+        {
+            "source": "/(.*)",
+            "destination": "/api/app.js"
+        }
+    ]
+}
