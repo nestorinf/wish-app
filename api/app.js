@@ -149,7 +149,18 @@ async function handler(req, res) {
         body { background: linear-gradient(180deg, #1b342d 0%, #307b38 50%, #1b342d 100%); background-attachment: fixed; font-family: sans-serif; }
         .custom-scroll::-webkit-scrollbar { width: 4px; }
         .custom-scroll::-webkit-scrollbar-thumb { background: #d42426; border-radius: 10px; }
-        
+        /* FIX DE DESBORDAMIENTO Y LINKS */
+        .wish-text {
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            word-break: break-word;
+            white-space: normal;
+        }
+        .wish-link {
+            color: #2563eb;
+            text-decoration: underline;
+            font-weight: bold;
+        }
         /* FIX DE DESBORDAMIENTO */
         .wish-text {
             word-wrap: break-word;
@@ -208,6 +219,14 @@ async function handler(req, res) {
             return c[Math.abs(h) % c.length];
         };
 
+        function linkify(text) {
+            // Usamos cuádruple escape para que el navegador reciba la barra simple
+            const urlRegex = /(https?:\\/\\/[^\\s]+)/g;
+            return text.replace(urlRegex, (url) => {
+                return '<a href="' + url + '" target="_blank" rel="noopener noreferrer" class="wish-link">Link 🔗</a>';
+            });
+        }
+
         async function login() {
             const name = document.getElementById('userInput').value.trim();
             const code = document.getElementById('userCode').value.trim();
@@ -259,18 +278,21 @@ async function handler(req, res) {
                 const grouped = data.reduce((acc, i) => { (acc[i.name] = acc[i.name] || []).push(i); return acc; }, {});
 
                 const buildHTML = (isPrivate) => Object.entries(grouped).map(([name, items]) => \`
-                    <div class="bg-white/90 p-5 rounded-[2rem] shadow-xl border-l-[10px]" style="border-color:\${getColor(name)}">
-                        <b class="text-[11px] font-black uppercase tracking-widest block mb-3 text-left" style="color:\${getColor(name)}">👤 \${name}</b>
-                        <div class="space-y-2">
-                            \${items.map(i => \`
-                                <div class="flex justify-between items-start gap-3 bg-white p-3.5 rounded-2xl text-xs shadow-sm border border-gray-50 overflow-hidden">
-                                    <span class="text-gray-700 font-bold text-left flex-1 wish-text">\${i.wish}</span>
-                                    \${isPrivate && name === currentUser ? \`<button onclick="deleteWish(\${i.id})" class="text-red-300 font-black px-2 hover:text-red-600 shrink-0">✕</button>\` : ''}
-                                </div>
-                            \`).join('')}
+            <div class="bg-white/90 p-5 rounded-[2rem] shadow-xl border-l-[10px]" style="border-color:\${getColor(name)}">
+                <b class="text-[11px] font-black uppercase tracking-widest block mb-3 text-left" style="color:\${getColor(name)}">👤 \${name}</b>
+                <div class="space-y-2">
+                    \${items.map(i => {
+                        const content = linkify(i.wish);
+                        return \`
+                        <div class="flex justify-between items-start gap-3 bg-white p-3.5 rounded-2xl text-xs shadow-sm border border-gray-50 overflow-hidden">
+                            <span class="text-gray-700 font-bold text-left flex-1 wish-text">\${content}</span>
+                            \${isPrivate && name === currentUser ? \`<button onclick="deleteWish(\${i.id})" class="text-red-300 font-black px-2 hover:text-red-600 shrink-0">✕</button>\` : ''}
                         </div>
-                    </div>
-                \`).join('');
+                        \`;
+                    }).join('')}
+                </div>
+            </div>
+        \`).join('');
 
                 const preview = document.getElementById('preview-list');
                 if (preview) preview.innerHTML = buildHTML(false);
@@ -306,6 +328,7 @@ async function handler(req, res) {
                 snow.appendChild(s);
             }
         };
+       
     </script>
 </body>
 </html>
