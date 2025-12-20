@@ -48,7 +48,7 @@ async function handler(req, res) {
         try {
             const data = JSON.parse(body);
             const cleanName = cleanInput(data.name).toUpperCase();
-            const cleanCode = cleanInput(data.code).toUpperCase(); // Forzar a mayúsculas
+            const cleanCode = cleanInput(data.code).toUpperCase();
 
             if (!cleanName || !cleanCode) {
                 res.writeHead(400); return res.end(JSON.stringify({ error: 'Faltan datos.' }));
@@ -57,7 +57,6 @@ async function handler(req, res) {
                 res.writeHead(401); return res.end(JSON.stringify({ error: 'Nombre no autorizado.' }));
             }
 
-            // Usamos UPPER(code) en el SELECT para comparar sin importar cómo se guardó
             const userRes = await pool.query(
                 'SELECT code, attempts, block_until FROM users WHERE UPPER(name) = $1',
                 [cleanName]
@@ -72,11 +71,9 @@ async function handler(req, res) {
 
             let loginValid = false;
             if (userRes.rows.length === 0) {
-                // Si el usuario no existe en la tabla (pero sí en ALLOWED_USERS), lo creamos
                 await pool.query('INSERT INTO users (name, code, attempts) VALUES ($1, $2, 0)', [cleanName, cleanCode]);
                 loginValid = true;
             } else if (userRes.rows[0].code.toUpperCase() === cleanCode) {
-                // Comparamos el código de la base de datos en mayúsculas
                 await pool.query('UPDATE users SET attempts = 0, block_until = NULL WHERE name = $1', [cleanName]);
                 loginValid = true;
             }
@@ -89,9 +86,9 @@ async function handler(req, res) {
                 const newAttempts = (userRes.rows[0]?.attempts || 0) + 1;
                 let blockUntil = newAttempts >= 3 ? new Date(Date.now() + 2 * 60 * 1000) : null;
                 await pool.query('UPDATE users SET attempts = $1, block_until = $2 WHERE name = $3', [newAttempts, blockUntil, cleanName]);
-                res.writeHead(403); return res.end(JSON.stringify({ error: newAttempts >= 3 ? 'BLOQUEADO.' : `ERROR ${newAttempts}/3`, locked: newAttempts >= 3 }));
+                res.writeHead(403); return res.end(JSON.stringify({ error: newAttempts >= 3 ? 'BLOQUEADO.' : `ERROR \${newAttempts}/3`, locked: newAttempts >= 3 }));
             }
-        } catch (err) { res.writeHead(400); return res.end(JSON.stringify({ error: 'Error en servidor.' })); }
+        } catch (err) { res.writeHead(400); return res.end(JSON.stringify({ error: 'Error.' })); }
     }
 
     // --- API: AGREGAR ---
@@ -111,7 +108,7 @@ async function handler(req, res) {
     // --- API: ELIMINAR ---
     if (pUrl.pathname === '/api/delete' && req.method === 'POST') {
         const decoded = verifyToken(req);
-        if (!decoded) { res.writeHead(401).end(); return; }
+        if (!decoded) { res.writeHead(401); return res.end(JSON.stringify({ error: 'Sesión expirada' })); }
         let b = ''; req.on('data', c => b += c); await new Promise(r => req.on('end', r));
         const { id } = JSON.parse(b);
         await pool.query('DELETE FROM wishes WHERE id = $1 AND name = $2', [id, decoded.name]);
@@ -135,8 +132,6 @@ async function handler(req, res) {
         res.writeHead(404).end(); return;
     }
 
-    if (pUrl.pathname.startsWith('/api/')) { res.writeHead(404).end(); return; }
-
     // --- FRONTEND ---
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.end(`
@@ -154,6 +149,14 @@ async function handler(req, res) {
         body { background: linear-gradient(180deg, #1b342d 0%, #307b38 50%, #1b342d 100%); background-attachment: fixed; font-family: sans-serif; }
         .custom-scroll::-webkit-scrollbar { width: 4px; }
         .custom-scroll::-webkit-scrollbar-thumb { background: #d42426; border-radius: 10px; }
+        
+        /* FIX DE DESBORDAMIENTO */
+        .wish-text {
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            word-break: break-word;
+            white-space: normal;
+        }
     </style>
 </head>
 <body class="min-h-screen flex flex-col items-center p-4">
@@ -161,8 +164,8 @@ async function handler(req, res) {
     <audio id="audio-player" loop><source src="/api/musica" type="audio/mpeg"></audio>
     <button id="music-btn" onclick="handleMusic()" class="fixed bottom-6 left-6 w-12 h-12 bg-yellow-500 rounded-full shadow-2xl z-50 flex items-center justify-center text-xl hover:scale-110 transition-transform">🎵</button>
 
-    <div class="w-full max-w-md z-10 pt-10">
-        <div id="login-view" class="bg-white/90 backdrop-blur-lg rounded-[2.5rem] shadow-2xl p-8 text-center border border-white/20">
+    <div class="w-full max-w-md z-10 pt-6">
+        <div id="login-view" class="bg-white/90 backdrop-blur-lg rounded-[2.5rem] shadow-2xl p-6 text-center border border-white/20">
             <span class="text-6xl mb-4 block">🎄</span>
             <h1 class="text-3xl font-black text-red-600 mb-2 italic tracking-tighter uppercase">Intercambio 2025</h1>
             
@@ -180,16 +183,18 @@ async function handler(req, res) {
         </div>
 
         <div id="app-view" class="hidden space-y-6">
-            <div class="bg-white/95 backdrop-blur-md rounded-[2.5rem] p-8 shadow-xl border border-white/20 text-center relative">
-                <button onclick="logout()" class="absolute top-8 left-8 text-gray-400 text-[10px] font-black uppercase hover:text-red-600 transition-colors font-bold tracking-widest">✕ Salir</button>
-                <a href="https://wa.me/584245834938" target="_blank" class="absolute top-8 right-8 text-green-600 text-[10px] font-black uppercase font-bold tracking-widest">🔑 Clave</a>
-                <h2 id="welcome-msg" class="text-2xl font-black text-green-900 mb-6 italic uppercase tracking-tighter mt-4"></h2>
+            <div class="bg-white/95 backdrop-blur-md rounded-[2.5rem] p-6 shadow-xl border border-white/20 text-center relative">
+                <div class="flex justify-between items-center mb-4 px-2">
+                    <button onclick="logout()" class="text-gray-400 text-[10px] font-black uppercase hover:text-red-600 transition-colors font-bold">✕ Salir</button>
+                    <a href="https://wa.me/584245834938" target="_blank" class="text-green-600 text-[10px] font-black uppercase">🔑 Clave</a>
+                </div>
+                <h2 id="welcome-msg" class="text-xl font-black text-green-900 mb-6 italic uppercase tracking-tighter"></h2>
                 <div class="space-y-3">
-                    <input type="text" id="wishInput" placeholder="¿Qué quieres pedir?" class="w-full p-4 border rounded-xl bg-gray-50 outline-none mb-2 text-sm font-bold shadow-inner text-center">
+                    <input type="text" id="wishInput" placeholder="¿Qué quieres pedir?" class="w-full p-4 border rounded-xl bg-gray-50 outline-none text-sm font-bold shadow-inner text-center">
                     <button onclick="addWish()" class="w-full bg-red-600 text-white font-black py-4 rounded-xl shadow-md uppercase text-[10px] tracking-[0.2em]">Añadir Deseo 🎁</button>
                 </div>
             </div>
-            <div id="wishes-list" class="space-y-4 pb-20"></div>
+            <div id="wishes-list" class="space-y-4 pb-24"></div>
         </div>
     </div>
 
@@ -207,24 +212,14 @@ async function handler(req, res) {
             const name = document.getElementById('userInput').value.trim();
             const code = document.getElementById('userCode').value.trim();
             if (!name || !code) return alert("Completa los campos.");
-            
-            const res = await fetch('/api/login', { 
-                method: 'POST', 
-                headers: {'Content-Type': 'application/json'}, 
-                body: JSON.stringify({ name, code }) 
-            });
+            const res = await fetch('/api/login', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ name, code }) });
             const data = await res.json();
-            
             if (res.ok) { 
                 localStorage.setItem('naviwish_token', data.token);
                 localStorage.setItem('naviwish_user', data.name);
-                currentUser = data.name; 
-                render(); 
+                currentUser = data.name; render(); 
                 song.play().then(() => localStorage.setItem('playMusic', 'true')).catch(() => {});
-            } else { 
-                alert(data.error); 
-                if (data.locked) location.reload(); 
-            }
+            } else { alert(data.error); if (data.locked) location.reload(); }
         }
 
         function logout() { 
@@ -238,25 +233,18 @@ async function handler(req, res) {
             if (!val) return;
             const res = await fetch('/api/add', { 
                 method: 'POST', 
-                headers: {
-                    'Content-Type': 'application/json', 
-                    'Authorization': 'Bearer ' + localStorage.getItem('naviwish_token')
-                }, 
+                headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + localStorage.getItem('naviwish_token')}, 
                 body: JSON.stringify({ wish: val }) 
             });
             if (res.status === 401) return logout();
-            document.getElementById('wishInput').value = ''; 
-            loadWishes();
+            document.getElementById('wishInput').value = ''; loadWishes();
         }
 
         async function deleteWish(id) {
             if (confirm('¿Eliminar deseo?')) { 
                 const res = await fetch('/api/delete', { 
                     method: 'POST', 
-                    headers: {
-                        'Content-Type': 'application/json', 
-                        'Authorization': 'Bearer ' + localStorage.getItem('naviwish_token')
-                    }, 
+                    headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + localStorage.getItem('naviwish_token')}, 
                     body: JSON.stringify({ id }) 
                 }); 
                 if (res.status === 401) return logout();
@@ -268,19 +256,16 @@ async function handler(req, res) {
             try {
                 const res = await fetch('/api/wishes');
                 const data = await res.json();
-                const grouped = data.reduce((acc, i) => { 
-                    (acc[i.name] = acc[i.name] || []).push(i); 
-                    return acc; 
-                }, {});
+                const grouped = data.reduce((acc, i) => { (acc[i.name] = acc[i.name] || []).push(i); return acc; }, {});
 
                 const buildHTML = (isPrivate) => Object.entries(grouped).map(([name, items]) => \`
                     <div class="bg-white/90 p-5 rounded-[2rem] shadow-xl border-l-[10px]" style="border-color:\${getColor(name)}">
                         <b class="text-[11px] font-black uppercase tracking-widest block mb-3 text-left" style="color:\${getColor(name)}">👤 \${name}</b>
                         <div class="space-y-2">
                             \${items.map(i => \`
-                                <div class="flex justify-between items-center bg-white p-3 rounded-2xl text-xs shadow-sm border border-gray-50">
-                                    <span class="text-gray-700 font-bold text-left">\${i.wish}</span>
-                                    \${isPrivate && name === currentUser ? \`<button onclick="deleteWish(\${i.id})" class="text-red-300 font-black px-2 hover:text-red-600 transition-colors">✕</button>\` : ''}
+                                <div class="flex justify-between items-start gap-3 bg-white p-3.5 rounded-2xl text-xs shadow-sm border border-gray-50 overflow-hidden">
+                                    <span class="text-gray-700 font-bold text-left flex-1 wish-text">\${i.wish}</span>
+                                    \${isPrivate && name === currentUser ? \`<button onclick="deleteWish(\${i.id})" class="text-red-300 font-black px-2 hover:text-red-600 shrink-0">✕</button>\` : ''}
                                 </div>
                             \`).join('')}
                         </div>
@@ -302,9 +287,6 @@ async function handler(req, res) {
                 document.getElementById('login-view').classList.add('hidden');
                 document.getElementById('app-view').classList.remove('hidden');
                 document.getElementById('welcome-msg').innerText = 'HOLA, ' + currentUser;
-            } else {
-                document.getElementById('login-view').classList.remove('hidden');
-                document.getElementById('app-view').classList.add('hidden');
             }
             loadWishes();
         }
@@ -316,17 +298,11 @@ async function handler(req, res) {
 
         window.onload = () => {
             render();
-            if (localStorage.getItem('playMusic') === 'true') {
-                song.play().catch(() => {});
-            }
+            if (localStorage.getItem('playMusic') === 'true') song.play().catch(() => {});
             const snow = document.getElementById('snow');
             for (let i = 0; i < 30; i++) {
-                const s = document.createElement('div'); 
-                s.className = 'snowflake'; 
-                s.innerHTML = '❄';
-                s.style.left = Math.random() * 100 + 'vw'; 
-                s.style.animationDuration = (Math.random() * 5 + 5) + 's';
-                s.style.opacity = Math.random();
+                const s = document.createElement('div'); s.className = 'snowflake'; s.innerHTML = '❄';
+                s.style.left = Math.random() * 100 + 'vw'; s.style.animationDuration = (Math.random() * 5 + 5) + 's';
                 snow.appendChild(s);
             }
         };
@@ -336,7 +312,5 @@ async function handler(req, res) {
     `);
 }
 
-if (require.main === module) {
-    require('http').createServer(handler).listen(3000);
-}
+if (require.main === module) { require('http').createServer(handler).listen(3000); }
 module.exports = handler;
